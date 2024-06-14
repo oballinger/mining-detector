@@ -8,10 +8,10 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
 import utils
+import logging
 
-EE_PROJECT = os.environ.get('EE_PROJECT', 'earthindex')
+EE_PROJECT = os.environ.get('EE_PROJECT', 'dphil-258716')
 
 class S2_Data_Extractor:
     """
@@ -94,7 +94,7 @@ class S2_Data_Extractor:
 
         # convert from a structured array to a numpy array
         pixels = np.array(pixels.tolist())
-
+        #print(tile)
         return pixels, tile
     
     def predict_on_tile(self, tile, model, pred_threshold, logger):
