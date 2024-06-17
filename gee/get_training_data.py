@@ -25,11 +25,11 @@ class Tile:
         tile: a DLTile like object
     """
 
-    def __init__(self, lat, lon, tilesize):
+    def __init__(self, lat, lon, tilesize, resolution):
         self.lat = lat
         self.lon = lon
         self.tilesize = tilesize
-        self.resolution = 10
+        self.resolution = resolution
 
     def get_mgrs_crs(self):
         crs = DLTile.from_latlon(
@@ -57,7 +57,7 @@ class Tile:
         center_point = shapely.geometry.Point(self.x, self.y)
         # I don't know why it works better when adding one to the tilesize
         buffer_distance = (
-            (self.tilesize + 1) * 10 / 2
+            (self.tilesize + 1) * self.resolution / 2
         )  # assume that resolution is always 10 because S2 data
         circle = center_point.buffer(buffer_distance)
         minx, miny, maxx, maxy = circle.bounds
@@ -78,7 +78,8 @@ class TrainingData:
         start_date,
         end_date,
         clear_threshold=0.75,
-        batch_size=500
+        batch_size=500,
+        sensor='S2'
     ):
         self.sampling_file = sampling_file
         self.label_class = label_class
@@ -87,6 +88,8 @@ class TrainingData:
         self.end_date = end_date
         self.clear_threshold = clear_threshold
         self.batch_size = batch_size
+        self.sensor = sensor
+
 
     def create_tiles(self):
         self.sampling_locations = gpd.read_file(
@@ -97,10 +100,18 @@ class TrainingData:
         lons = self.sampling_locations.geometry.x
         # create a  for each sampling location
         tiles = []
+
+        if self.sensor == 'S2':
+            resolution = 10
+        if self.sensor == 'NICFI':
+            resolution = 4.77
+
         for lat, lon in zip(lats, lons):
-            tile = Tile(lat, lon, self.patch_size)
+            tile = Tile(lat, lon, self.patch_size, resolution=resolution)
             tile.create_geometry()
             tiles.append(tile)
+
+        print(self.sensor, resolution)
         print(f"{len(tiles)} tiles to download")
         self.tiles = tiles
 
@@ -109,10 +120,13 @@ class TrainingData:
         self.create_tiles()
 
         print(f"Getting data from {self.start_date} to {self.end_date}")
-        s2_data = gee.S2_Data_Extractor(
-            self.tiles, self.start_date, self.end_date, self.clear_threshold, self.batch_size
+
+        sensor_data = gee.Data_Extractor(
+            self.tiles, self.start_date, self.end_date, self.clear_threshold, self.batch_size, self.sensor
         )
-        self.data, self.tiles = s2_data.get_patches()
+
+
+        self.data, self.tiles = sensor_data.get_patches()
         self.data = np.array(
             [utils.pad_patch(patch, self.patch_size) for patch in self.data]
         )
@@ -125,8 +139,10 @@ class TrainingData:
             os.makedirs(basepath)
         basepath += f"{self.sampling_file}_{self.start_date}_{self.end_date}"
         save_patch_arrays(self.data, basepath, self.label_class)
-
-        fig = utils.plot_numpy_grid(np.clip(self.data[:, :, :, (3, 2, 1)] / 3000, 0, 1))
+        if self.sensor == 'S2':
+            fig = utils.plot_numpy_grid(np.clip(self.data[:, :, :, (3, 2, 1)] / 3000, 0, 1))
+        if self.sensor == 'NICFI':
+            fig = utils.plot_numpy_grid(np.clip(self.data[:, :, :, (0, 1, 2)] / 3000, 0, 1))
         fig.savefig(f"{basepath}.png", bbox_inches="tight", pad_inches=0)
         plt.show()
 

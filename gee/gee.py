@@ -13,7 +13,7 @@ import logging
 
 EE_PROJECT = os.environ.get('EE_PROJECT', 'dphil-258716')
 
-class S2_Data_Extractor:
+class Data_Extractor:
     """
     Pull Sentinel-2 data for a set of tiles.
     Inputs:
@@ -30,31 +30,63 @@ class S2_Data_Extractor:
     """
 
     def __init__(self, tiles, start_date, end_date, clear_threshold,
-                 batch_size, ee_project=EE_PROJECT):
+                 batch_size, sensor, ee_project=EE_PROJECT):
         self.tiles = tiles
         self.start_date = start_date
         self.end_date = end_date
         self.clear_threshold = clear_threshold
         self.batch_size = batch_size
+        self.sensor= sensor
 
         ee.Initialize(
             opt_url="https://earthengine-highvolume.googleapis.com",
             project=ee_project,
         )
 
-        s2 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+        if sensor=='NICFI':
+            nicfi = ee.ImageCollection('projects/planet-nicfi/assets/basemaps/asia')
 
-        # Cloud Score+ is produced from L1C data;  can be applied to L1C or L2A.
-        csPlus = ee.ImageCollection("GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED")
-        QA_BAND = "cs_cdf"
+            self.composite = (
+                nicfi.filterDate(start_date, end_date)
+                .median()
+            )
 
-        self.composite = (
-            s2.filterDate(start_date, end_date)
-            .linkCollection(csPlus, [QA_BAND])
-            .map(lambda img:
-                     img.updateMask(img.select(QA_BAND).gte(clear_threshold)))
-            .median()
-        )
+            self.band_ids = [
+                    "R",
+                    "G",
+                    "B",
+                    "N",
+                ]
+
+
+        if sensor=='S2':
+            s2 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+
+            # Cloud Score+ is produced from L1C data;  can be applied to L1C or L2A.
+            csPlus = ee.ImageCollection("GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED")
+            QA_BAND = "cs_cdf"
+
+            self.composite = (
+                s2.filterDate(start_date, end_date)
+                .linkCollection(csPlus, [QA_BAND])
+                .map(lambda img:
+                        img.updateMask(img.select(QA_BAND).gte(clear_threshold)))
+                .median()
+            )
+            self.band_ids = [
+                    "B1",
+                    "B2",
+                    "B3",
+                    "B4",
+                    "B5",
+                    "B6",
+                    "B7",
+                    "B8A",
+                    "B8",
+                    "B9",
+                    "B11",
+                    "B12",
+                ]
     
     @retry.Retry(timeout=240)
     def get_tile_data(self, tile):
@@ -72,20 +104,7 @@ class S2_Data_Extractor:
         )
         pixels = ee.data.computePixels(
             {
-                "bandIds": [
-                    "B1",
-                    "B2",
-                    "B3",
-                    "B4",
-                    "B5",
-                    "B6",
-                    "B7",
-                    "B8A",
-                    "B8",
-                    "B9",
-                    "B11",
-                    "B12",
-                ],
+                "bandIds": self.band_ids,
                 "expression": composite_tile,
                 "fileFormat": "NUMPY_NDARRAY",
                 #'grid': {'crsCode': tile.crs} this was causing weird issues
@@ -96,6 +115,7 @@ class S2_Data_Extractor:
         pixels = np.array(pixels.tolist())
         #print(tile)
         return pixels, tile
+
     
     def predict_on_tile(self, tile, model, pred_threshold, logger):
         """
@@ -111,7 +131,9 @@ class S2_Data_Extractor:
         pixels = np.array(utils.pad_patch(pixels, tile_info.tilesize))
         pixels = np.clip(pixels / 10000.0, 0, 1)
 
-        input_shape = model.layers[0].input_shape
+        #input_shape = model.layers[0].input_shape
+        input_shape = model.input_shape
+
         if type(input_shape) == list:  # For an ensemble of models
             input_shape = input_shape[0]
         chip_size = input_shape[1]
