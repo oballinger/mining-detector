@@ -44,8 +44,9 @@ class Data_Extractor:
         )
 
         if sensor=='NICFI':
-            nicfi = ee.ImageCollection('projects/planet-nicfi/assets/basemaps/asia')
-
+            nicfi_asia = ee.ImageCollection('projects/planet-nicfi/assets/basemaps/asia')
+            nicfi_america= ee.ImageCollection('projects/planet-nicfi/assets/basemaps/americas')
+            nicfi=nicfi_asia.merge(nicfi_america)
             self.composite = (
                 nicfi.filterDate(start_date, end_date)
                 .median()
@@ -57,7 +58,19 @@ class Data_Extractor:
                     "B",
                     "N",
                 ]
+        if sensor=='S1':
+            s1= ee.ImageCollection("COPERNICUS/S1_GRD")
+            self.composite = (
+                s1.filterDate(start_date, end_date)
+                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                .median()
+            )
 
+            self.band_ids = [
+                    "VV",
+                    "VH",
+                ]
 
         if sensor=='S2':
             s2 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
@@ -87,7 +100,44 @@ class Data_Extractor:
                     "B11",
                     "B12",
                 ]
-    
+        if sensor=='Multi':
+            s1= (ee.ImageCollection("COPERNICUS/S1_GRD")
+                .filterDate(start_date, end_date)
+                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                .median())
+            s2 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+
+            # Cloud Score+ is produced from L1C data;  can be applied to L1C or L2A.
+            csPlus = ee.ImageCollection("GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED")
+            QA_BAND = "cs_cdf"
+
+            s2 = (
+                s2.filterDate(start_date, end_date)
+                .linkCollection(csPlus, [QA_BAND])
+                .map(lambda img:
+                        img.updateMask(img.select(QA_BAND).gte(clear_threshold)))
+                .median()
+            )
+            self.composite = s1.addBands(s2)
+            self.band_ids = [
+                    "VV",
+                    "VH",
+                    "B1",
+                    "B2",
+                    "B3",
+                    "B4",
+                    "B5",
+                    "B6",
+                    "B7",
+                    "B8A",
+                    "B8",
+                    "B9",
+                    "B11",
+                    "B12",
+                ]
+            
+            
     @retry.Retry(timeout=240)
     def get_tile_data(self, tile):
         """
@@ -113,7 +163,8 @@ class Data_Extractor:
 
         # convert from a structured array to a numpy array
         pixels = np.array(pixels.tolist())
-        #print(tile)
+        pixels=utils.unit_norm(pixels, self.sensor)
+
         return pixels, tile
 
     
@@ -129,7 +180,7 @@ class Data_Extractor:
             return gpd.GeoDataFrame(), tile
         
         pixels = np.array(utils.pad_patch(pixels, tile_info.tilesize))
-        pixels = np.clip(pixels / 10000.0, 0, 1)
+        #pixels = np.clip(pixels / 10000.0, 0, 1)
 
         #input_shape = model.layers[0].input_shape
         input_shape = model.input_shape
@@ -141,6 +192,7 @@ class Data_Extractor:
         stride = chip_size // 2
         chips, chip_geoms = utils.chips_from_tile(
             pixels, tile_info, chip_size, stride)
+
         chips = np.array(chips)
         chip_geoms.to_crs("EPSG:4326", inplace=True)
 

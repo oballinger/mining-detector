@@ -68,7 +68,6 @@ class Tile:
         bbox = bbox.geometry[0]
         self.geometry = bbox
 
-
 class TrainingData:
     def __init__(
         self,
@@ -79,7 +78,8 @@ class TrainingData:
         end_date,
         clear_threshold=0.75,
         batch_size=500,
-        sensor='S2'
+        sensor='S2',
+        get_norms=False
     ):
         self.sampling_file = sampling_file
         self.label_class = label_class
@@ -89,7 +89,7 @@ class TrainingData:
         self.clear_threshold = clear_threshold
         self.batch_size = batch_size
         self.sensor = sensor
-
+        self.get_norms = get_norms
 
     def create_tiles(self):
         self.sampling_locations = gpd.read_file(
@@ -101,7 +101,7 @@ class TrainingData:
         # create a  for each sampling location
         tiles = []
 
-        if self.sensor == 'S2':
+        if self.sensor == 'S2' or self.sensor == 'S1' or self.sensor == 'Multi':
             resolution = 10
         if self.sensor == 'NICFI':
             resolution = 4.77
@@ -125,24 +125,34 @@ class TrainingData:
             self.tiles, self.start_date, self.end_date, self.clear_threshold, self.batch_size, self.sensor
         )
 
-
         self.data, self.tiles = sensor_data.get_patches()
         self.data = np.array(
             [utils.pad_patch(patch, self.patch_size) for patch in self.data]
         )
         print(f"Retrieved {self.data.shape[0]} patches")
 
+        if self.get_norms:
+
+            self.means = np.array([np.mean(self.data[:, :, :, i]) for i in range(self.data.shape[3])])
+            self.stds = np.array([np.std(self.data[:, :, :, i]) for i in range(self.data.shape[3])])
+            #create dict with sensor name
+            norms = {'sensor': self.sensor, 'means': list(self.means), 'stds': list(self.stds)}
+            print(norms)
         # save the data
-        basepath = f"../data/training_data/{self.patch_size}_px/"
+        basepath = f"../data/training_data/{self.sensor}_{self.patch_size}_px/"
         # create directory if it doesn't exist
         if not os.path.exists(basepath):
             os.makedirs(basepath)
         basepath += f"{self.sampling_file}_{self.start_date}_{self.end_date}"
         save_patch_arrays(self.data, basepath, self.label_class)
         if self.sensor == 'S2':
-            fig = utils.plot_numpy_grid(np.clip(self.data[:, :, :, (3, 2, 1)] / 3000, 0, 1))
+            fig = utils.plot_numpy_grid(self.data[:, :, :, (3, 2, 1)])
+        if self.sensor == 'S1':
+            fig = utils.plot_numpy_grid(self.data[:, :, :, (0, 1, 1)])
+        if self.sensor == 'Multi':
+            fig = utils.plot_numpy_grid(self.data[:, :, :, (0, 3, 2)])
         if self.sensor == 'NICFI':
-            fig = utils.plot_numpy_grid(np.clip(self.data[:, :, :, (0, 1, 2)] / 3000, 0, 1))
+            fig = utils.plot_numpy_grid(self.data[:, :, :, (0, 1, 2)])
         fig.savefig(f"{basepath}.png", bbox_inches="tight", pad_inches=0)
         plt.show()
 

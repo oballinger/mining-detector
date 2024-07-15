@@ -20,6 +20,7 @@ def create_tiles(region, tilesize, padding, resolution):
         region, tilesize=tilesize, resolution=resolution, pad=padding
     )
     tiles = [tile for tile in tiles]
+
     return tiles
 
 
@@ -123,50 +124,28 @@ def chips_from_tile(data, tile, width, stride):
     chip_coords = gpd.GeoDataFrame(geometry=chip_coords, crs=tile.crs)
     return chips, chip_coords
 
+def minmax_norm(pixels):
+    for i in range(pixels.shape[2]):
+        pixels[:,:,i] = (pixels[:,:,i] - np.min(pixels[:,:,i])) / (np.max(pixels[:,:,i]) - np.min(pixels[:,:,i]))
+    return pixels
 
-def unit_norm(samples):
-    """
-    Channel-wise normalization of pixels in a patch.
-    Means and deviations are constants generated from an earlier dataset.
-    If changed, models will need to be retrained
-    Input: (n,n,12) numpy array or list.
-    Returns: normalized numpy array
-    """
+def unit_norm(pixels, sensor):
+
     means = [
-        1405.8951,
-        1175.9235,
-        1172.4902,
-        1091.9574,
-        1321.1304,
-        2181.5363,
-        2670.2361,
-        2491.2354,
-        2948.3846,
-        420.1552,
-        2028.0025,
-        1076.2417,
+    {'sensor': 'S1', 'means': [-10.051072817856399, -16.651867464319356], 'stds': [2.1963779145197058, 2.2873515832032276]},
+    {'sensor': 'NICFI', 'means': [693.2319128158244, 591.905562019799, 370.506283013815, 2193.8863101174647], 'stds': [566.4167817564434, 407.356998077997, 301.56748366624953, 832.109348018454]},
+    {'sensor': 'S2', 'means': [1047.0421641825503, 820.0529029070626, 736.9112470910904, 657.3229316729462, 917.6294938035609, 1601.7804385065751, 1862.7748065344267, 2070.6779779384606, 1900.2215942671394, 1106.512413656176, 1527.2338024527187, 846.5729582225177], 'stds': [138.43361906215526, 242.0529108661862, 324.7921000512644, 461.1909194988024, 462.2156960074404, 590.9384137703064, 684.0157226477746, 767.9100518105192, 764.794394500607, 312.25277975004417, 755.6635139128948, 519.84684613692]},
+    {'sensor': 'Multi', 'means': [-10.051072817856399, -16.651867464319356, 1047.0421641825503, 820.0529029070626, 736.9112470910904, 657.3229316729462, 917.6294938035609, 1601.7804385065751, 1862.7748065344267, 2070.6779779384606, 1900.2215942671394, 1106.512413656176, 1527.2338024527187, 846.5729582225177],'stds': [2.1963779145197058, 2.2873515832032276, 138.43361906215526, 242.0529108661862, 324.7921000512644, 461.1909194988024, 462.2156960074404, 590.9384137703064, 684.0157226477746, 767.9100518105192, 764.794394500607, 312.25277975004417, 755.6635139128948, 519.84684613692]}
     ]
-    deviations = [
-        291.9438,
-        398.5558,
-        504.557,
-        748.6153,
-        651.8549,
-        730.9811,
-        913.6062,
-        893.9428,
-        1055.297,
-        225.2153,
-        970.1915,
-        752.8637,
-    ]
-    normalized_samples = np.zeros_like(samples).astype("float32")
-    for i in range(0, 12):
-        # normalize each channel to global unit norm
-        normalized_samples[:, :, i] = (
-            np.array(samples.astype(float))[:, :, i] - means[i]
-        ) / deviations[i]
-    return normalized_samples
+    norms = [m for m in means if m['sensor'] == sensor]
+    means=norms[0]['means']
+    deviations=norms[0]['stds']    
+
+    # normalize each band to global unit norm
+    for i in range(pixels.shape[2]):
+        pixels[:, :, i] = (pixels[:, :, i] - means[i]) / deviations[i]
+
+    return pixels
 
 
 def plot_numpy_grid(patches):
